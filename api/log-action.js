@@ -7,8 +7,7 @@ export default async function handler(req, res) {
     action,
     userId,
     username,
-    reason,
-    moderator
+    reason
   } = req.body || {};
 
   if (!action || !userId || !reason) {
@@ -26,46 +25,79 @@ export default async function handler(req, res) {
     });
   }
 
-  // Roles to ping
-  const pingRoles =
-    "<@&1538505102644740167> <@&1543383003445723159>";
+  // Get the logged-in moderator from their Discord login
+  const cookies = req.headers.cookie || "";
 
-  // Embed colors
-  const colors = {
-    Ban: 0xED4245,
-    Warn: 0xFEE75C,
-    Unban: 0x57F287,
-    Timeout: 0xE67E22,
-    Kick: 0x99AAB5,
-    Note: 0x5865F2
-  };
+  const tokenMatch = cookies.match(
+    /discord_access_token=([^;]+)/
+  );
 
-  const embedColor = colors[action] || 0x5865F2;
+  if (!tokenMatch) {
+    return res.status(401).json({
+      error: "You are not logged in with Discord."
+    });
+  }
 
-  // Generate unique case ID
-  const caseId = `#${Date.now().toString().slice(-6)}`;
-
-  const now = new Date();
-
-  const date = now.toLocaleDateString("en-US", {
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-    timeZone: "Europe/Paris"
-  });
-
-  const time = now.toLocaleTimeString("en-US", {
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZone: "Europe/Paris"
-  });
+  const accessToken = decodeURIComponent(tokenMatch[1]);
 
   try {
+    const userResponse = await fetch(
+      "https://discord.com/api/users/@me",
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`
+        }
+      }
+    );
+
+    if (!userResponse.ok) {
+      return res.status(401).json({
+        error: "Your Discord session has expired. Please log in again."
+      });
+    }
+
+    const moderatorUser = await userResponse.json();
+
+    const moderatorName =
+      moderatorUser.global_name ||
+      moderatorUser.username;
+
+    // Roles to ping
+    const pingRoles =
+      "<@&1538505102644740167> <@&1543383003445723159>";
+
+    const colors = {
+      Ban: 0xED4245,
+      Warn: 0xFEE75C,
+      Unban: 0x57F287,
+      Timeout: 0xE67E22,
+      Kick: 0x99AAB5,
+      Note: 0x5865F2
+    };
+
+    const embedColor = colors[action] || 0x5865F2;
+
+    const caseId =
+      `#${Date.now().toString().slice(-6)}`;
+
+    const now = new Date();
+
+    const date = now.toLocaleDateString("en-US", {
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+      timeZone: "Europe/Paris"
+    });
+
+    const time = now.toLocaleTimeString("en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: "Europe/Paris"
+    });
+
     const message = {
-      // Ping Chronarch Overseer + Executive Division
       content: pingRoles,
 
-      // Allows Discord to actually notify the roles
       allowed_mentions: {
         roles: [
           "1538505102644740167",
@@ -76,13 +108,12 @@ export default async function handler(req, res) {
       embeds: [
         {
           title: "🛡️ Moderation Action",
-
           color: embedColor,
 
           fields: [
             {
               name: "Moderator",
-              value: moderator || "Unknown",
+              value: moderatorName,
               inline: false
             },
             {
@@ -145,7 +176,6 @@ export default async function handler(req, res) {
 
     if (!response.ok) {
       const error = await response.text();
-
       return res.status(response.status).send(error);
     }
 
