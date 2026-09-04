@@ -1,6 +1,8 @@
 import crypto from "crypto";
 import sql from "../lib/db.js";
 
+export const runtime = "nodejs";
+
 export const config = {
   api: {
     bodyParser: false
