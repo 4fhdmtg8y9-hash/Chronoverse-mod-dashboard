@@ -1,4 +1,5 @@
 import Busboy from "busboy";
+import sql from "../lib/db.js";
 export const config = {
   api: {
     bodyParser: false
