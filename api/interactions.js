@@ -52,9 +52,13 @@ function verifyDiscordRequest(rawBody, signature, timestamp) {
       publicKey,
       Buffer.from(signature, "hex")
     );
-
   } catch (error) {
-    console.error("Discord verification error:", error);
+    console.error(
+      "SIGNATURE VERIFICATION ERROR:",
+      error?.message || String(error),
+      error?.stack || ""
+    );
+
     return false;
   }
 }
@@ -68,38 +72,81 @@ export default async function handler(req, res) {
     });
   }
 
+  // Check public key
   if (!PUBLIC_KEY) {
+    console.error(
+      "DISCORD_PUBLIC_KEY is missing."
+    );
+
     return res.status(500).json({
       error: "DISCORD_PUBLIC_KEY is missing."
     });
   }
 
-  const signature = req.headers["x-signature-ed25519"];
-  const timestamp = req.headers["x-signature-timestamp"];
+  // Discord signature headers
+  const signature =
+    req.headers["x-signature-ed25519"];
+
+  const timestamp =
+    req.headers["x-signature-timestamp"];
 
   if (!signature || !timestamp) {
+    console.error(
+      "Missing Discord signature."
+    );
+
     return res.status(401).json({
       error: "Missing Discord signature."
     });
   }
 
-  const rawBody = await getRawBody(req);
+  // Read raw request body
+  let rawBody;
 
-  if (!verifyDiscordRequest(
-    rawBody,
-    signature,
-    timestamp
-  )) {
+  try {
+    rawBody = await getRawBody(req);
+  } catch (error) {
+    console.error(
+      "RAW BODY ERROR:",
+      error?.message || String(error),
+      error?.stack || ""
+    );
+
+    return res.status(500).json({
+      error: "Unable to read request body."
+    });
+  }
+
+  // Verify Discord request
+  if (
+    !verifyDiscordRequest(
+      rawBody,
+      signature,
+      timestamp
+    )
+  ) {
+    console.error(
+      "Invalid Discord signature."
+    );
+
     return res.status(401).json({
       error: "Invalid Discord signature."
     });
   }
 
+  // Parse JSON
   let interaction;
 
   try {
-    interaction = JSON.parse(rawBody.toString());
-  } catch {
+    interaction =
+      JSON.parse(rawBody.toString());
+  } catch (error) {
+    console.error(
+      "JSON PARSE ERROR:",
+      error?.message || String(error),
+      error?.stack || ""
+    );
+
     return res.status(400).json({
       error: "Invalid JSON."
     });
@@ -107,61 +154,111 @@ export default async function handler(req, res) {
 
   // Discord verification ping
   if (interaction.type === 1) {
+    console.log(
+      "Discord verification ping received."
+    );
+
     return res.status(200).json({
       type: 1
     });
   }
 
-  // Only button interactions
+  // Only handle component/button interactions
   if (
     interaction.type !== 3 ||
     !interaction.data ||
     !interaction.data.custom_id
   ) {
+    console.error(
+      "Unsupported interaction:",
+      JSON.stringify(interaction)
+    );
+
     return res.status(400).json({
       error: "Unsupported Discord interaction."
     });
   }
 
-  const customId = interaction.data.custom_id;
+  const customId =
+    interaction.data.custom_id;
 
+  console.log(
+    "MODERATION BUTTON CLICKED:",
+    customId
+  );
+
+  // Check moderation button
   if (!customId.startsWith("mod_")) {
+    console.error(
+      "Unknown moderation button:",
+      customId
+    );
+
     return res.status(400).json({
       error: "Unknown moderation button."
     });
   }
 
-  const parts = customId.split("_");
+  const parts =
+    customId.split("_");
 
   const decision = parts[1];
   const actionId = parts[2];
+
+  console.log(
+    "Decision:",
+    decision,
+    "Action ID:",
+    actionId
+  );
 
   if (
     !["approve", "deny"].includes(decision) ||
     !actionId
   ) {
+    console.error(
+      "Invalid moderation button:",
+      customId
+    );
+
     return res.status(400).json({
       error: "Invalid moderation button."
     });
   }
 
-  const member = interaction.member;
+  // Get Discord member
+  const member =
+    interaction.member;
 
   if (!member || !member.roles) {
+
+    console.error(
+      "Moderator information unavailable."
+    );
+
     return res.status(200).json({
       type: 4,
       data: {
-        content: "❌ Moderator information unavailable.",
+        content:
+          "❌ Moderator information unavailable.",
         flags: 64
       }
     });
   }
 
-  const hasPermission = member.roles.some(roleId =>
-    ALLOWED_ROLES.includes(roleId)
-  );
+  // Check moderator role
+  const hasPermission =
+    member.roles.some(roleId =>
+      ALLOWED_ROLES.includes(roleId)
+    );
 
   if (!hasPermission) {
+
+    console.log(
+      "User attempted moderation review without permission:",
+      interaction.member.user?.id
+    );
+
     return res.status(200).json({
       type: 4,
       data: {
@@ -173,161 +270,57 @@ export default async function handler(req, res) {
   }
 
   /*
-   * ACKNOWLEDGE IMMEDIATELY
+   * Get the original Discord message.
+   *
+   * The actual embed was created by
+   * api/log-actions.js.
    */
-  res.status(200).json({
-    type: 6
-  });
+
+  const originalMessage =
+    interaction.message;
+
+  if (!originalMessage) {
+
+    console.error(
+      "Original Discord message is missing."
+    );
+
+    return res.status(200).json({
+      type: 4,
+      data: {
+        content:
+          "❌ Original moderation message could not be found.",
+        flags: 64
+      }
+    });
+  }
+
+  const newStatus =
+    decision === "approve"
+      ? "approved"
+      : "denied";
+
+  const statusText =
+    decision === "approve"
+      ? "✅ APPROVED"
+      : "❌ DENIED";
+
+  const reviewerId =
+    interaction.member.user.id;
 
   /*
-   * PROCESS AFTER ACKNOWLEDGEMENT
+   * Create updated embeds from the
+   * existing log-actions.js embed.
    */
 
-  try {
+  const updatedEmbeds =
+    (originalMessage.embeds || []).map(
+      embed => {
 
-    const { default: sql } =
-      await import("../lib/db.js");
-
-    /*
-     * Make sure the database columns exist.
-     */
-
-    await sql`
-      ALTER TABLE mod_actions
-      ADD COLUMN IF NOT EXISTS status VARCHAR(20)
-      DEFAULT 'pending'
-    `;
-
-    await sql`
-      ALTER TABLE mod_actions
-      ADD COLUMN IF NOT EXISTS reviewed_by VARCHAR(30)
-    `;
-
-    await sql`
-      ALTER TABLE mod_actions
-      ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMP
-    `;
-
-    await sql`
-      ALTER TABLE mod_actions
-      ADD COLUMN IF NOT EXISTS discord_message_id VARCHAR(30)
-    `;
-
-    await sql`
-      ALTER TABLE mod_actions
-      ADD COLUMN IF NOT EXISTS discord_channel_id VARCHAR(30)
-    `;
-
-    await sql`
-      ALTER TABLE mod_actions
-      ADD COLUMN IF NOT EXISTS case_id VARCHAR(30)
-    `;
-
-    /*
-     * Find the moderation action.
-     */
-
-    const rows = await sql`
-      SELECT
-        ma.id,
-        ma.status,
-        ma.action_type,
-        ma.target_discord_id,
-        ma.reason,
-        ma.case_id,
-        ma.discord_message_id,
-        ma.discord_channel_id,
-        m.username AS moderator_username
-      FROM mod_actions ma
-      JOIN moderators m
-        ON ma.moderator_id = m.id
-      WHERE ma.id = ${actionId}
-      LIMIT 1
-    `;
-
-    if (rows.length === 0) {
-      console.error(
-        "Moderation action not found:",
-        actionId
-      );
-
-      return;
-    }
-
-    const action = rows[0];
-
-    /*
-     * Don't allow a case to be reviewed twice.
-     */
-
-    if (action.status !== "pending") {
-      console.log(
-        `Case ${actionId} already ${action.status}`
-      );
-
-      return;
-    }
-
-    const newStatus =
-      decision === "approve"
-        ? "approved"
-        : "denied";
-
-    const reviewerId =
-      interaction.member.user.id;
-
-    /*
-     * Update database.
-     */
-
-    await sql`
-      UPDATE mod_actions
-      SET
-        status = ${newStatus},
-        reviewed_by = ${reviewerId},
-        reviewed_at = CURRENT_TIMESTAMP
-      WHERE id = ${actionId}
-    `;
-
-    /*
-     * Get the Discord message information.
-     */
-
-    const messageId =
-      interaction.message.id;
-
-    const channelId =
-      interaction.channel_id;
-
-    const botToken =
-      process.env.DISCORD_BOT_TOKEN;
-
-    if (!botToken) {
-      console.error(
-        "DISCORD_BOT_TOKEN is missing."
-      );
-
-      return;
-    }
-
-    /*
-     * Build the updated embeds.
-     */
-
-    const originalEmbeds =
-      interaction.message.embeds || [];
-
-    const updatedEmbeds =
-      originalEmbeds.map(embed => {
-
-        const fields =
+        let fields =
           [...(embed.fields || [])];
 
-        const statusText =
-          newStatus === "approved"
-            ? "✅ APPROVED"
-            : "❌ DENIED";
-
+        // Find Status field
         const statusIndex =
           fields.findIndex(
             field =>
@@ -337,9 +330,9 @@ export default async function handler(req, res) {
         if (statusIndex !== -1) {
 
           fields[statusIndex] = {
+            ...fields[statusIndex],
             name: "Status",
-            value: statusText,
-            inline: false
+            value: statusText
           };
 
         } else {
@@ -349,21 +342,17 @@ export default async function handler(req, res) {
             value: statusText,
             inline: false
           });
-
         }
 
-        /*
-         * Remove an old Reviewed By field
-         * if one somehow exists.
-         */
-
-        const filteredFields =
+        // Remove old Reviewed By fields
+        fields =
           fields.filter(
             field =>
               field.name !== "Reviewed By"
           );
 
-        filteredFields.push({
+        // Add reviewer
+        fields.push({
           name: "Reviewed By",
           value: `<@${reviewerId}>`,
           inline: false
@@ -371,90 +360,85 @@ export default async function handler(req, res) {
 
         return {
           ...embed,
-          fields: filteredFields
+          fields
         };
-      });
-
-    /*
-     * Disable the buttons.
-     */
-
-    const components = [
-      {
-        type: 1,
-        components: [
-          {
-            type: 2,
-            style:
-              newStatus === "approved"
-                ? 3
-                : 4,
-            label:
-              newStatus === "approved"
-                ? "Approved"
-                : "Denied",
-            custom_id:
-              `mod_${decision}_${actionId}`,
-            disabled: true
-          }
-        ]
       }
-    ];
-
-    /*
-     * EDIT THE DISCORD MESSAGE
-     * DIRECTLY THROUGH THE BOT API.
-     */
-
-    const discordResponse =
-      await fetch(
-        `https://discord.com/api/v10/channels/${channelId}/messages/${messageId}`,
-        {
-          method: "PATCH",
-
-          headers: {
-            "Authorization":
-              `Bot ${botToken}`,
-
-            "Content-Type":
-              "application/json"
-          },
-
-          body: JSON.stringify({
-            content:
-              interaction.message.content || "",
-
-            embeds:
-              updatedEmbeds,
-
-            components
-          })
-        }
-      );
-
-    if (!discordResponse.ok) {
-
-      const errorText =
-        await discordResponse.text();
-
-      console.error(
-        "Discord message update failed:",
-        discordResponse.status,
-        errorText
-      );
-
-      return;
-    }
-
-    console.log(
-      `Successfully ${newStatus} moderation action ${actionId}.`
     );
+
+  /*
+   * Keep both buttons but disable them.
+   */
+
+  const updatedComponents = [
+    {
+      type: 1,
+      components: [
+        {
+          type: 2,
+          style: 3,
+          label: "Approve",
+          custom_id:
+            `mod_approve_${actionId}`,
+          disabled: true
+        },
+        {
+          type: 2,
+          style: 4,
+          label: "Deny",
+          custom_id:
+            `mod_deny_${actionId}`,
+          disabled: true
+        }
+      ]
+    }
+  ];
+
+  /*
+   * IMPORTANT:
+   *
+   * We respond directly with Type 7.
+   *
+   * This tells Discord:
+   * "Update the message that contains
+   * the button that was clicked."
+   *
+   * No database query happens before
+   * Discord receives this response.
+   */
+
+  console.log(
+    "Sending Discord message update response..."
+  );
+
+  try {
+
+    return res.status(200).json({
+      type: 7,
+
+      data: {
+        content:
+          originalMessage.content || "",
+
+        embeds:
+          updatedEmbeds,
+
+        components:
+          updatedComponents
+      }
+    });
 
   } catch (error) {
 
     console.error(
-      "Moderation interaction error:",
-      error
+      "DISCORD RESPONSE ERROR:",
+      error?.message || String(error),
+      error?.stack || ""
     );
+
+    return res.status(500).json({
+      error:
+        error?.message ||
+        "Unable to update moderation message."
+    });
   }
 }
