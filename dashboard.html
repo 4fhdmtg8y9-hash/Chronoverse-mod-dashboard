@@ -93,8 +93,6 @@
       resize: vertical;
     }
 
-    /* Evidence upload */
-
     .upload-box {
       border: 1px dashed #454552;
       border-radius: 12px;
@@ -112,10 +110,6 @@
       border-radius: 9px;
       font-weight: bold;
       cursor: pointer;
-    }
-
-    .upload-button:active {
-      transform: scale(0.98);
     }
 
     #evidenceInput {
@@ -185,6 +179,54 @@
     .logout:hover {
       color: white;
     }
+
+    .history-item {
+      background: #0d0d12;
+      border: 1px solid #30303d;
+      border-radius: 12px;
+      padding: 15px;
+      margin-bottom: 12px;
+    }
+
+    .history-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+
+    .history-action {
+      font-weight: bold;
+    }
+
+    .history-date {
+      color: #92929f;
+      font-size: 13px;
+    }
+
+    .history-user {
+      color: #aaa;
+      margin-bottom: 8px;
+    }
+
+    .history-reason {
+      color: #ddd;
+      line-height: 1.4;
+    }
+
+    .history-case {
+      margin-top: 10px;
+      color: #5865F2;
+      font-weight: bold;
+    }
+
+    .empty-history {
+      color: #92929f;
+    }
+
+    .error-history {
+      color: #ED4245;
+    }
   </style>
 </head>
 
@@ -193,7 +235,10 @@
   <div class="dashboard">
 
     <header>
-      <h1>🛡️ Chronoverse Moderator Dashboard</h1>
+
+      <h1>
+        🛡️ Chronoverse Moderator Dashboard
+      </h1>
 
       <p>
         Record and manage your moderation actions.
@@ -202,12 +247,17 @@
       <div id="loggedInAs">
         Checking Discord account...
       </div>
+
     </header>
 
 
+    <!-- MODERATION ACTION -->
+
     <div class="card">
 
-      <h2>Log Moderation Action</h2>
+      <h2>
+        Log Moderation Action
+      </h2>
 
 
       <label for="action">
@@ -215,12 +265,31 @@
       </label>
 
       <select id="action">
-        <option value="Warn">⚠️ Warn</option>
-        <option value="Kick">👢 Kick</option>
-        <option value="Ban">🔨 Ban</option>
-        <option value="Unban">🔓 Unban</option>
-        <option value="Timeout">⏱️ Timeout</option>
-        <option value="Note">📝 Moderation Note</option>
+
+        <option value="Warn">
+          ⚠️ Warn
+        </option>
+
+        <option value="Kick">
+          👢 Kick
+        </option>
+
+        <option value="Ban">
+          🔨 Ban
+        </option>
+
+        <option value="Unban">
+          🔓 Unban
+        </option>
+
+        <option value="Timeout">
+          ⏱️ Timeout
+        </option>
+
+        <option value="Note">
+          📝 Moderation Note
+        </option>
+
       </select>
 
 
@@ -307,15 +376,30 @@
 
       <div id="status"></div>
 
+    </div>
 
-      <a
-        class="logout"
-        href="/"
-      >
-        Log out
-      </a>
+
+    <!-- MODERATION HISTORY -->
+
+    <div class="card">
+
+      <h2>
+        📋 My Moderation History
+      </h2>
+
+      <div id="history">
+        Loading moderation history...
+      </div>
 
     </div>
+
+
+    <a
+      class="logout"
+      href="/"
+    >
+      Log out
+    </a>
 
   </div>
 
@@ -325,7 +409,10 @@
     let selectedEvidence = null;
 
 
-    // Load logged-in Discord moderator
+    // =========================
+    // LOAD DISCORD MODERATOR
+    // =========================
+
     async function loadModerator() {
 
       const loggedInAs =
@@ -356,120 +443,195 @@
           "Unable to load Discord account.";
 
       }
+
     }
 
 
-    // When a photo is selected
+    // =========================
+    // PHOTO SELECTION
+    // =========================
+
     document
       .getElementById("evidenceInput")
-      .addEventListener("change", function(event) {
+      .addEventListener(
+        "change",
+        function(event) {
 
-        const file =
-          event.target.files[0];
+          const file =
+            event.target.files[0];
 
-        if (!file) {
-          return;
+          if (!file) {
+            return;
+          }
+
+
+          if (!file.type.startsWith("image/")) {
+
+            alert(
+              "Please select an image."
+            );
+
+            event.target.value = "";
+
+            return;
+          }
+
+
+          if (
+            file.size >
+            8 * 1024 * 1024
+          ) {
+
+            alert(
+              "Please choose an image smaller than 8 MB."
+            );
+
+            event.target.value = "";
+
+            return;
+          }
+
+
+          selectedEvidence = file;
+
+
+          document
+            .getElementById("fileName")
+            .textContent =
+            file.name;
+
+
+          const preview =
+            document.getElementById(
+              "preview"
+            );
+
+
+          preview.src =
+            URL.createObjectURL(file);
+
+
+          preview.style.display =
+            "block";
+
+
+          document
+            .getElementById(
+              "removePhoto"
+            )
+            .style.display =
+            "block";
+
         }
+      );
 
 
-        // Only allow images
-        if (!file.type.startsWith("image/")) {
-
-          alert("Please select an image.");
-
-          event.target.value = "";
-
-          return;
-        }
-
-
-        // Limit to 8 MB
-        if (file.size > 8 * 1024 * 1024) {
-
-          alert("Please choose an image smaller than 8 MB.");
-
-          event.target.value = "";
-
-          return;
-        }
-
-
-        selectedEvidence = file;
-
-
-        document.getElementById("fileName").textContent =
-          file.name;
-
-
-        const preview =
-          document.getElementById("preview");
-
-
-        preview.src =
-          URL.createObjectURL(file);
-
-        preview.style.display =
-          "block";
-
-
-        document.getElementById("removePhoto")
-          .style.display = "block";
-
-      });
-
+    // =========================
+    // REMOVE PHOTO
+    // =========================
 
     function removeEvidence() {
 
       selectedEvidence = null;
 
-      document.getElementById("evidenceInput").value = "";
 
-      document.getElementById("fileName").textContent =
+      document
+        .getElementById(
+          "evidenceInput"
+        )
+        .value = "";
+
+
+      document
+        .getElementById(
+          "fileName"
+        )
+        .textContent =
         "No photo selected";
 
-      document.getElementById("preview").style.display =
+
+      document
+        .getElementById(
+          "preview"
+        )
+        .style.display =
         "none";
 
-      document.getElementById("preview").src = "";
 
-      document.getElementById("removePhoto")
-        .style.display = "none";
+      document
+        .getElementById(
+          "preview"
+        )
+        .src = "";
+
+
+      document
+        .getElementById(
+          "removePhoto"
+        )
+        .style.display =
+        "none";
 
     }
 
 
+    // =========================
+    // SUBMIT MODERATION ACTION
+    // =========================
+
     async function submitAction() {
 
       const button =
-        document.getElementById("submitButton");
+        document.getElementById(
+          "submitButton"
+        );
+
 
       const status =
-        document.getElementById("status");
+        document.getElementById(
+          "status"
+        );
 
 
       const action =
-        document.getElementById("action").value;
+        document.getElementById(
+          "action"
+        ).value;
+
 
       const userId =
-        document.getElementById("userId").value.trim();
+        document.getElementById(
+          "userId"
+        ).value.trim();
+
 
       const username =
-        document.getElementById("username").value.trim();
+        document.getElementById(
+          "username"
+        ).value.trim();
+
 
       const reason =
-        document.getElementById("reason").value.trim();
+        document.getElementById(
+          "reason"
+        ).value.trim();
 
 
-      if (!userId || !reason) {
+      if (
+        !userId ||
+        !username ||
+        !reason
+      ) {
 
         status.textContent =
-          "Please enter a User ID and reason.";
+          "Please enter a User ID, username, and reason.";
 
         return;
       }
 
 
       button.disabled = true;
+
 
       status.textContent =
         "Sending moderation log...";
@@ -544,22 +706,38 @@
           data.caseId;
 
 
-        document.getElementById("userId").value =
-          "";
+        document
+          .getElementById(
+            "userId"
+          )
+          .value = "";
 
-        document.getElementById("username").value =
-          "";
 
-        document.getElementById("reason").value =
-          "";
+        document
+          .getElementById(
+            "username"
+          )
+          .value = "";
+
+
+        document
+          .getElementById(
+            "reason"
+          )
+          .value = "";
+
 
         removeEvidence();
 
 
+        // Refresh history
+        loadHistory();
+
       } catch (error) {
 
         status.textContent =
-          "Error: " + error.message;
+          "Error: " +
+          error.message;
 
       } finally {
 
@@ -570,16 +748,161 @@
     }
 
 
+    // =========================
+    // LOAD MODERATION HISTORY
+    // =========================
+
+    async function loadHistory() {
+
+      const history =
+        document.getElementById(
+          "history"
+        );
+
+
+      try {
+
+        const response =
+          await fetch(
+            "/api/my-actions"
+          );
+
+
+        const data =
+          await response.json();
+
+
+        if (!response.ok) {
+
+          throw new Error(
+            data.error ||
+            "Unable to load history."
+          );
+
+        }
+
+
+        if (
+          !data.actions ||
+          data.actions.length === 0
+        ) {
+
+          history.innerHTML =
+            `
+              <p class="empty-history">
+                No moderation actions yet.
+              </p>
+            `;
+
+          return;
+        }
+
+
+        history.innerHTML =
+          data.actions
+            .map(action => {
+
+              return `
+
+                <div class="history-item">
+
+                  <div class="history-top">
+
+                    <div class="history-action">
+                      ${escapeHtml(
+                        action.action_type
+                      )}
+                    </div>
+
+                    <div class="history-date">
+                      ${new Date(
+                        action.created_at
+                      ).toLocaleString()}
+                    </div>
+
+                  </div>
+
+
+                  <div class="history-user">
+
+                    User ID:
+                    ${escapeHtml(
+                      action.target_discord_id ||
+                      "Unknown"
+                    )}
+
+                  </div>
+
+
+                  <div class="history-reason">
+
+                    ${escapeHtml(
+                      action.reason ||
+                      "No reason provided."
+                    )}
+
+                  </div>
+
+
+                  <div class="history-case">
+
+                    ${escapeHtml(
+                      action.case_id ||
+                      "No Case ID"
+                    )}
+
+                  </div>
+
+                </div>
+
+              `;
+
+            })
+            .join("");
+
+      } catch (error) {
+
+        history.innerHTML =
+          `
+            <p class="error-history">
+              Error: ${escapeHtml(
+                error.message
+              )}
+            </p>
+          `;
+
+      }
+
+    }
+
+
+    // =========================
+    // SECURITY
+    // =========================
+
+    function escapeHtml(value) {
+
+      const div =
+        document.createElement(
+          "div"
+        );
+
+      div.textContent =
+        value;
+
+      return div.innerHTML;
+
+    }
+
+
+    // =========================
+    // START
+    // =========================
+
     loadModerator();
-    <div class="card">
 
-      <h2>📋 My Moderation History</h2>
+    loadHistory();
 
-      <div id="history">
-        Loading moderation history...
-      </div>
-
-    </div>
   </script>
 
 </body>
