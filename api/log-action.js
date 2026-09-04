@@ -302,13 +302,57 @@ export default async function handler(req, res) {
           "Discord rejected the moderation log."
       });
     }
-    // =========================
-    // SUCCESS
-    // =========================
-    return res.status(200).json({
-      success: true,
-      caseId: caseId
-    });
+// =========================
+// SAVE TO DATABASE
+// =========================
+
+let moderatorRecord = await sql`
+  SELECT id
+  FROM moderators
+  WHERE discord_id = ${moderatorUser.id}
+`;
+
+if (moderatorRecord.length === 0) {
+  moderatorRecord = await sql`
+    INSERT INTO moderators (
+      discord_id,
+      username,
+      avatar_url
+    )
+    VALUES (
+      ${moderatorUser.id},
+      ${moderatorUser.username},
+      ${moderatorUser.avatar}
+    )
+    RETURNING id
+  `;
+}
+
+await sql`
+  INSERT INTO mod_actions (
+    moderator_id,
+    action_type,
+    target_discord_id,
+    reason,
+    case_id
+  )
+  VALUES (
+    ${moderatorRecord[0].id},
+    ${action},
+    ${userId},
+    ${reason},
+    ${caseId}
+  )
+`;
+
+// =========================
+// SUCCESS
+// =========================
+
+return res.status(200).json({
+  success: true,
+  caseId: caseId
+});
   } catch (error) {
     console.error(
       "Discord sending error:",
