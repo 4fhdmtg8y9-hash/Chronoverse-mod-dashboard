@@ -69,9 +69,10 @@ export default async function handler(req, res) {
     }
     moderatorUser = await userResponse.json();
   } catch (error) {
-    console.error(error);
+    console.error("Discord user error:", error);
     return res.status(500).json({
-      error: "Unable to retrieve your Discord account."
+      error:
+        "Unable to retrieve your Discord account."
     });
   }
   // =========================
@@ -103,10 +104,7 @@ export default async function handler(req, res) {
       });
     }
   } catch (error) {
-    console.error(
-      "Role check error:",
-      error
-    );
+    console.error("Role check error:", error);
     return res.status(500).json({
       error:
         "Unable to verify your Discord permissions."
@@ -124,12 +122,9 @@ export default async function handler(req, res) {
         fileSize: 8 * 1024 * 1024
       }
     });
-    busboy.on(
-      "field",
-      (name, value) => {
-        fields[name] = value;
-      }
-    );
+    busboy.on("field", (name, value) => {
+      fields[name] = value;
+    });
     busboy.on(
       "file",
       (name, file, info) => {
@@ -138,44 +133,29 @@ export default async function handler(req, res) {
           info.filename || "evidence.png";
         const mimeType =
           info.mimeType || "image/png";
-        file.on(
-          "data",
-          chunk => {
-            chunks.push(chunk);
+        file.on("data", chunk => {
+          chunks.push(chunk);
+        });
+        file.on("end", () => {
+          if (chunks.length > 0) {
+            uploadedFile = {
+              buffer: Buffer.concat(chunks),
+              filename,
+              mimeType
+            };
           }
-        );
-        file.on(
-          "end",
-          () => {
-            if (chunks.length > 0) {
-              uploadedFile = {
-                buffer: Buffer.concat(chunks),
-                filename,
-                mimeType
-              };
-            }
-          }
-        );
+        });
       }
     );
     await new Promise(
       (resolve, reject) => {
-        busboy.on(
-          "finish",
-          resolve
-        );
-        busboy.on(
-          "error",
-          reject
-        );
+        busboy.on("finish", resolve);
+        busboy.on("error", reject);
         req.pipe(busboy);
       }
     );
   } catch (error) {
-    console.error(
-      "Busboy error:",
-      error
-    );
+    console.error("Busboy error:", error);
     return res.status(400).json({
       error:
         "Could not process the submitted form."
@@ -308,15 +288,18 @@ export default async function handler(req, res) {
       error:
         `Moderator database error: ${
           error?.message || String(error)
-        }`,
-      code:
-        error?.code || null,
-      detail:
-        error?.detail || null
+        }`
     });
   }
   // =========================
   // CREATE MODERATION ACTION
+  // =========================
+  //
+  // IMPORTANT:
+  // We are only using columns that
+  // definitely exist in your original
+  // mod_actions table.
+  //
   // =========================
   let actionRecord;
   try {
@@ -325,17 +308,13 @@ export default async function handler(req, res) {
         moderator_id,
         action_type,
         target_discord_id,
-        reason,
-        case_id,
-        status
+        reason
       )
       VALUES (
         ${moderatorRecord[0].id},
         ${action},
         ${userId},
-        ${reason},
-        ${caseId},
-        'pending'
+        ${reason}
       )
       RETURNING id
     `;
@@ -348,11 +327,7 @@ export default async function handler(req, res) {
       error:
         `Moderation action database error: ${
           error?.message || String(error)
-        }`,
-      code:
-        error?.code || null,
-      detail:
-        error?.detail || null
+        }`
     });
   }
   const actionId =
@@ -523,7 +498,13 @@ export default async function handler(req, res) {
       });
     }
     // =========================
-    // SAVE DISCORD MESSAGE INFO
+    // TRY TO SAVE DISCORD MESSAGE
+    // =========================
+    //
+    // These columns may not exist yet,
+    // so failure here will NOT stop the
+    // moderation action from succeeding.
+    //
     // =========================
     try {
       await sql`
@@ -537,9 +518,9 @@ export default async function handler(req, res) {
           ${actionId}
       `;
     } catch (error) {
-      console.error(
-        "Unable to save Discord message information:",
-        error
+      console.warn(
+        "Discord message info could not be saved:",
+        error?.message || String(error)
       );
     }
     // =========================
