@@ -299,6 +299,10 @@ export default async function handler(req, res) {
     decision === "approve"
       ? "approved"
       : "denied";
+ const statusText =
+    decision === "approve"
+      ? "✅ APPROVED"
+      : "❌ DENIED";
 const reviewerId =
   interaction.member.user.id;
 
@@ -322,10 +326,6 @@ if (decision === "approve") {
     WHERE id = ${actionId}
   `;
 }
-  const statusText =
-    decision === "approve"
-      ? "✅ APPROVED"
-      : "❌ DENIED";
 
   const reviewerId =
     interaction.member.user.id;
