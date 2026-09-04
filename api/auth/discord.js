@@ -9,7 +9,7 @@ export default function handler(req, res) {
     "?client_id=" + encodeURIComponent(clientId) +
     "&response_type=code" +
     "&redirect_uri=" + encodeURIComponent(redirectUri) +
-    "&scope=identify";
+    "&scope=identify%20guilds.members.read";
 
   res.redirect(302, discordUrl);
 }
