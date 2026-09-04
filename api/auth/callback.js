@@ -1,18 +1,13 @@
 export default async function handler(req, res) {
   const { code } = req.query;
-
   if (!code) {
     return res.status(400).send("Missing Discord authorization code.");
   }
-
   const clientId = process.env.DISCORD_CLIENT_ID;
   const clientSecret = process.env.DISCORD_CLIENT_SECRET;
-
   const redirectUri =
     "https://chronoverse-mod-dashboard.vercel.app/api/auth/callback";
-
   const guildId = "1538324229114695753";
-
   const allowedRoles = [
     "1538324425546666114", // Founder
     "1538505102644740167", // Chronarch Overseer
@@ -23,9 +18,8 @@ export default async function handler(req, res) {
     "1538569564340879420", // Senior Moderator
     "1538569917471916083"  // Moderator
   ];
-
   try {
-    // Exchange authorization code for an access token
+    // Exchange Discord authorization code for an access token
     const tokenResponse = await fetch(
       "https://discord.com/api/oauth2/token",
       {
@@ -42,75 +36,69 @@ export default async function handler(req, res) {
         })
       }
     );
-
     const tokenData = await tokenResponse.json();
-
     if (!tokenResponse.ok) {
       return res.status(400).json(tokenData);
     }
-
-    // Get the logged-in Discord user
+    const accessToken = tokenData.access_token;
+    // Get the Discord user
     const userResponse = await fetch(
       "https://discord.com/api/users/@me",
       {
         headers: {
-          Authorization: `Bearer ${tokenData.access_token}`
+          Authorization: `Bearer ${accessToken}`
         }
       }
     );
-
+    if (!userResponse.ok) {
+      return res.status(401).send("Unable to retrieve your Discord account.");
+    }
     const user = await userResponse.json();
-
-    // Check if the user is a member of the Chronoverse server
+    // Check Chronoverse membership
     const memberResponse = await fetch(
       `https://discord.com/api/users/@me/guilds/${guildId}/member`,
       {
         headers: {
-          Authorization: `Bearer ${tokenData.access_token}`
+          Authorization: `Bearer ${accessToken}`
         }
       }
     );
-
     if (!memberResponse.ok) {
-      return res.status(403).send("Access denied. You are not a member of the Chronoverse server.");
+      return res
+        .status(403)
+        .send("Access denied. You are not a member of the Chronoverse server.");
     }
-
     const member = await memberResponse.json();
-
-    // Check whether the member has an approved staff role
+    // Check approved staff role
     const isModerator = member.roles.some(roleId =>
       allowedRoles.includes(roleId)
     );
-
     if (!isModerator) {
-      return res.status(403).send("Access denied. You do not have a moderator role.");
+      return res
+        .status(403)
+        .send("Access denied. You do not have an approved moderator role.");
     }
-
-    // Successful login
-    res.status(200).send(`
-      <html>
-        <head>
-          <title>Chronoverse Moderator Dashboard</title>
-          <style>
-            body {
-              background: #0d0d12;
-              color: white;
-              font-family: Arial, sans-serif;
-              text-align: center;
-              padding-top: 100px;
-            }
-          </style>
-        </head>
-        <body>
-          <h1>Welcome, ${user.global_name || user.username}!</h1>
-          <p>Moderator access confirmed.</p>
-          <p>Your dashboard is coming next.</p>
-        </body>
-      </html>
-    `);
-
+    /*
+      Store the Discord access token in an HttpOnly cookie.
+      The browser cannot read this cookie with JavaScript,
+      but your server-side API routes can use it to identify
+      the logged-in moderator.
+    */
+    const cookie = [
+      `discord_access_token=${encodeURIComponent(accessToken)}`,
+      "HttpOnly",
+      "Secure",
+      "SameSite=Lax",
+      "Path=/",
+      "Max-Age=604800"
+    ].join("; ");
+    res.setHeader("Set-Cookie", cookie);
+    // Send the approved moderator to the dashboard
+    return res.redirect(302, "/dashboard.html");
   } catch (error) {
     console.error(error);
-    res.status(500).send("Something went wrong.");
+    return res.status(500).send(
+      "Something went wrong while signing you in."
+    );
   }
 }
