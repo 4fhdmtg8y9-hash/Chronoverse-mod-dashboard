@@ -299,7 +299,29 @@ export default async function handler(req, res) {
     decision === "approve"
       ? "approved"
       : "denied";
+const reviewerId =
+  interaction.member.user.id;
 
+// Award 5 points ONLY when approved
+if (decision === "approve") {
+  await sql`
+    UPDATE moderators
+    SET
+      points = points + 5,
+      approved_actions = approved_actions + 1
+    WHERE id = (
+      SELECT moderator_id
+      FROM mod_actions
+      WHERE id = ${actionId}
+    )
+  `;
+
+  await sql`
+    UPDATE mod_actions
+    SET points_awarded = 5
+    WHERE id = ${actionId}
+  `;
+}
   const statusText =
     decision === "approve"
       ? "✅ APPROVED"
