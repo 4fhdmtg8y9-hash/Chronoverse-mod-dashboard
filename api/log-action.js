@@ -58,9 +58,7 @@ export default async function handler(req, res) {
 
     const moderatorUser = await userResponse.json();
 
-    const moderatorName =
-      moderatorUser.global_name ||
-      moderatorUser.username;
+    const moderatorName = moderatorUser.username;
 
     // Roles to ping
     const pingRoles =
