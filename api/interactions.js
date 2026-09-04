@@ -36,28 +36,49 @@ function getRawBody(req) {
       resolve(data);
     });
 
-    req.on("error", reject);
+    req.on("error", (error) => {
+      reject(error);
+    });
   });
 }
 
 function verifyDiscordRequest(rawBody, signature, timestamp) {
-  if (!signature || !timestamp || !PUBLIC_KEY) {
-    console.error(
-      "Missing Discord verification headers or public key"
-    );
+  if (!signature) {
+    console.error("Missing Discord signature");
+    return false;
+  }
+
+  if (!timestamp) {
+    console.error("Missing Discord timestamp");
+    return false;
+  }
+
+  if (!PUBLIC_KEY) {
+    console.error("DISCORD_PUBLIC_KEY is missing");
     return false;
   }
 
   try {
-    const message = Buffer.from(timestamp + rawBody);
+    /*
+     * Discord gives us the Ed25519 public key as
+     * 32 raw bytes.
+     *
+     * Node crypto expects an SPKI DER key.
+     *
+     * This is the standard Ed25519 SPKI prefix.
+     */
+    const publicKey = Buffer.concat([
+      Buffer.from("302a300506032b6570032100", "hex"),
+      Buffer.from(PUBLIC_KEY, "hex"),
+    ]);
+
+    const message = Buffer.from(
+      timestamp + rawBody,
+      "utf8"
+    );
 
     const signatureBuffer = Buffer.from(
       signature,
-      "hex"
-    );
-
-    const publicKeyBuffer = Buffer.from(
-      PUBLIC_KEY,
       "hex"
     );
 
@@ -65,7 +86,7 @@ function verifyDiscordRequest(rawBody, signature, timestamp) {
       null,
       message,
       {
-        key: publicKeyBuffer,
+        key: publicKey,
         format: "der",
         type: "spki",
       },
@@ -74,7 +95,7 @@ function verifyDiscordRequest(rawBody, signature, timestamp) {
   } catch (error) {
     console.error(
       "Discord signature verification error:",
-      error?.message || error
+      error?.message || String(error)
     );
 
     return false;
@@ -82,12 +103,19 @@ function verifyDiscordRequest(rawBody, signature, timestamp) {
 }
 
 export default async function handler(req, res) {
+  // --------------------------------
   // Browser test
+  // --------------------------------
+
   if (req.method === "GET") {
     return res.status(200).json({
       status: "Discord interactions endpoint is online.",
     });
   }
+
+  // --------------------------------
+  // Only allow POST
+  // --------------------------------
 
   if (req.method !== "POST") {
     return res.status(405).json({
@@ -96,6 +124,10 @@ export default async function handler(req, res) {
   }
 
   try {
+    // --------------------------------
+    // Get Discord's ORIGINAL raw body
+    // --------------------------------
+
     const rawBody = await getRawBody(req);
 
     const signature =
@@ -104,7 +136,10 @@ export default async function handler(req, res) {
     const timestamp =
       req.headers["x-signature-timestamp"];
 
-    // Verify the request came from Discord
+    // --------------------------------
+    // Verify Discord request
+    // --------------------------------
+
     const verified = verifyDiscordRequest(
       rawBody,
       signature,
@@ -119,21 +154,39 @@ export default async function handler(req, res) {
         .send("Invalid request signature");
     }
 
+    // --------------------------------
+    // Parse interaction
+    // --------------------------------
+
     const interaction = JSON.parse(rawBody);
 
+    // --------------------------------
     // Discord Ping
+    // --------------------------------
+
     if (interaction.type === 1) {
       return res.status(200).json({
         type: 1,
       });
     }
 
-    // Discord button/component interaction
+    // --------------------------------
+    // Button interaction
+    // --------------------------------
+
     if (interaction.type === 3) {
       const customId =
         interaction.data?.custom_id || "";
 
-      // Only handle moderation buttons
+      console.log(
+        "BUTTON INTERACTION:",
+        customId
+      );
+
+      // --------------------------------
+      // Only moderation buttons
+      // --------------------------------
+
       if (
         !customId.startsWith("mod_approve_") &&
         !customId.startsWith("mod_deny_")
@@ -142,6 +195,10 @@ export default async function handler(req, res) {
           type: 6,
         });
       }
+
+      // --------------------------------
+      // Determine approval / denial
+      // --------------------------------
 
       const isApprove =
         customId.startsWith("mod_approve_");
@@ -159,7 +216,10 @@ export default async function handler(req, res) {
         });
       }
 
-      // Check moderator roles
+      // --------------------------------
+      // Check moderator permissions
+      // --------------------------------
+
       const memberRoles =
         interaction.member?.roles || [];
 
@@ -179,7 +239,10 @@ export default async function handler(req, res) {
         });
       }
 
-      // Find moderation action
+      // --------------------------------
+      // Get moderation action
+      // --------------------------------
+
       const result = await sql`
         SELECT
           ma.id,
@@ -212,7 +275,10 @@ export default async function handler(req, res) {
 
       const action = result[0];
 
-      // Prevent double verification
+      // --------------------------------
+      // Prevent double review
+      // --------------------------------
+
       if (action.status !== "pending") {
         return res.status(200).json({
           type: 4,
@@ -233,8 +299,11 @@ export default async function handler(req, res) {
         interaction.user?.id ||
         "unknown";
 
-      // Update case status
-      await sql`
+      // --------------------------------
+      // Update moderation case
+      // --------------------------------
+
+      const updated = await sql`
         UPDATE mod_actions
         SET
           status = ${newStatus},
@@ -242,14 +311,32 @@ export default async function handler(req, res) {
           reviewed_at = NOW()
         WHERE id = ${actionId}
           AND status = 'pending'
+        RETURNING id
       `;
 
-      // APPROVED = +5 POINTS
+      // Someone else may have reviewed it
+      if (!updated || updated.length === 0) {
+        return res.status(200).json({
+          type: 4,
+          data: {
+            content:
+              "⚠️ This case has already been reviewed.",
+            flags: 64,
+          },
+        });
+      }
+
+      // --------------------------------
+      // APPROVED
+      // +5 POINTS
+      // --------------------------------
+
       if (isApprove) {
         await sql`
           UPDATE moderators
           SET
-            points = COALESCE(points, 0) + 5,
+            points =
+              COALESCE(points, 0) + 5,
             approved_actions =
               COALESCE(approved_actions, 0) + 1
           WHERE id = ${action.moderator_id}
@@ -260,7 +347,13 @@ export default async function handler(req, res) {
           SET points_awarded = 5
           WHERE id = ${actionId}
         `;
-      } else {
+      }
+
+      // --------------------------------
+      // DENIED
+      // --------------------------------
+
+      else {
         await sql`
           UPDATE mod_actions
           SET points_awarded = 0
@@ -268,19 +361,29 @@ export default async function handler(req, res) {
         `;
       }
 
-      // Get the existing Discord embed
+      // --------------------------------
+      // Get original Discord embed
+      // --------------------------------
+
       const existingEmbeds =
         interaction.message?.embeds || [];
 
-      let embed = existingEmbeds[0]
-        ? {
-            ...existingEmbeds[0],
-          }
-        : {
-            title: "🛡️ Moderation Action",
-          };
+      let embed;
 
-      // Update Status field
+      if (existingEmbeds.length > 0) {
+        embed = {
+          ...existingEmbeds[0],
+        };
+      } else {
+        embed = {
+          title: "🛡️ Moderation Action",
+        };
+      }
+
+      // --------------------------------
+      // Update embed fields
+      // --------------------------------
+
       const oldFields = embed.fields || [];
 
       const fields = oldFields.map((field) => {
@@ -296,14 +399,20 @@ export default async function handler(req, res) {
         return field;
       });
 
-      // Add reviewer
+      // --------------------------------
+      // Reviewed By
+      // --------------------------------
+
       fields.push({
         name: "Reviewed By",
         value: `<@${reviewerId}>`,
         inline: true,
       });
 
-      // Add points
+      // --------------------------------
+      // Points
+      // --------------------------------
+
       fields.push({
         name: "Points",
         value: isApprove
@@ -314,11 +423,15 @@ export default async function handler(req, res) {
 
       embed.fields = fields;
 
+      // --------------------------------
       // Disable buttons
+      // --------------------------------
+
       const disabledComponents = (
         interaction.message?.components || []
       ).map((row) => ({
         ...row,
+
         components: (row.components || []).map(
           (button) => ({
             ...button,
@@ -327,15 +440,23 @@ export default async function handler(req, res) {
         ),
       }));
 
-      // Update the original Discord message
+      // --------------------------------
+      // Update original Discord message
+      // --------------------------------
+
       return res.status(200).json({
         type: 7,
+
         data: {
           embeds: [embed],
           components: disabledComponents,
         },
       });
     }
+
+    // --------------------------------
+    // Unknown interaction
+    // --------------------------------
 
     return res.status(200).json({
       type: 6,
