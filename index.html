@@ -3,9 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-  <title>Chronoverse Moderator Dashboard</title>
-
+  <title>Chronoverse Moderator Login</title>
   <style>
     * {
       box-sizing: border-box;
@@ -13,200 +11,87 @@
       padding: 0;
       font-family: Arial, sans-serif;
     }
-
     body {
       min-height: 100vh;
       background: #0d0d12;
       color: white;
-      padding: 30px 15px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
     }
-
-    .dashboard {
-      max-width: 800px;
-      margin: auto;
-    }
-
-    header {
-      margin-bottom: 30px;
-    }
-
-    h1 {
-      font-size: 28px;
-      margin-bottom: 8px;
-    }
-
-    header p {
-      color: #92929f;
-    }
-
-    .card {
+    .login-card {
+      width: 100%;
+      max-width: 440px;
       background: #17171f;
       border: 1px solid #292936;
-      border-radius: 16px;
-      padding: 25px;
-      margin-bottom: 20px;
+      border-radius: 18px;
+      padding: 40px 28px;
+      text-align: center;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
     }
-
-    label {
+    .icon {
+      width: 70px;
+      height: 70px;
+      margin: 0 auto 20px;
+      border-radius: 18px;
+      background: #5865F2;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 32px;
+    }
+    h1 {
+      font-size: 28px;
+      margin-bottom: 10px;
+    }
+    .subtitle {
+      color: #92929f;
+      line-height: 1.5;
+      margin-bottom: 30px;
+    }
+    .discord-button {
       display: block;
-      margin-bottom: 8px;
-      font-weight: bold;
-    }
-
-    input,
-    select,
-    textarea {
       width: 100%;
-      background: #0d0d12;
-      color: white;
-      border: 1px solid #30303d;
-      border-radius: 9px;
-      padding: 13px;
-      margin-bottom: 20px;
-      font-size: 15px;
-    }
-
-    textarea {
-      min-height: 110px;
-      resize: vertical;
-    }
-
-    button {
-      width: 100%;
-      padding: 14px;
-      border: none;
-      border-radius: 9px;
+      padding: 15px;
+      border-radius: 10px;
       background: #5865F2;
       color: white;
+      text-decoration: none;
       font-size: 16px;
       font-weight: bold;
-      cursor: pointer;
+      transition: opacity 0.2s, transform 0.2s;
     }
-
-    button:disabled {
-      opacity: .6;
-      cursor: not-allowed;
+    .discord-button:hover {
+      opacity: 0.9;
     }
-
-    #status {
-      margin-top: 15px;
-      text-align: center;
-      color: #aaa;
+    .discord-button:active {
+      transform: scale(0.98);
+    }
+    .notice {
+      margin-top: 20px;
+      font-size: 13px;
+      color: #6f6f7c;
+      line-height: 1.5;
     }
   </style>
 </head>
-
 <body>
-
-  <div class="dashboard">
-
-    <header>
-      <h1>Chronoverse Moderator Dashboard</h1>
-      <p>Record and manage your moderation actions.</p>
-    </header>
-
-    <div class="card">
-
-      <label for="action">Moderation Action</label>
-
-      <select id="action">
-        <option value="Warn">Warn</option>
-        <option value="Kick">Kick</option>
-        <option value="Ban">Ban</option>
-        <option value="Unban">Unban</option>
-        <option value="Note">Moderation Note</option>
-      </select>
-
-      <label for="userId">User ID</label>
-
-      <input
-        id="userId"
-        type="text"
-        placeholder="Enter Discord User ID"
-      >
-
-      <label for="username">Username</label>
-
-      <input
-        id="username"
-        type="text"
-        placeholder="Enter Discord username"
-      >
-
-      <label for="reason">Reason</label>
-
-      <textarea
-        id="reason"
-        placeholder="Enter the reason for this action..."
-      ></textarea>
-
-      <button id="submitButton" onclick="submitAction()">
-        Submit Moderation Log
-      </button>
-
-      <div id="status"></div>
-
+  <div class="login-card">
+    <div class="icon">
+      🛡️
     </div>
-
+    <h1>Moderator Login</h1>
+    <p class="subtitle">
+      Sign in with your Discord account to access
+      the Marvel Chronoverse Moderator Dashboard.
+    </p>
+    <a href="/api/auth/discord" class="discord-button">
+      Connect with Discord
+    </a>
+    <p class="notice">
+      Access is restricted to approved Chronoverse staff members.
+    </p>
   </div>
-
-  <script>
-    async function submitAction() {
-
-      const button = document.getElementById("submitButton");
-      const status = document.getElementById("status");
-
-      const action = document.getElementById("action").value;
-      const userId = document.getElementById("userId").value.trim();
-      const username = document.getElementById("username").value.trim();
-      const reason = document.getElementById("reason").value.trim();
-
-      if (!userId || !reason) {
-        status.textContent = "Please enter a User ID and reason.";
-        return;
-      }
-
-      button.disabled = true;
-      status.textContent = "Sending moderation log...";
-
-      try {
-
-        const response = await fetch("/api/log-action", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            action,
-            userId,
-            username,
-            reason
-          })
-        });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-          throw new Error(data.error || "Something went wrong.");
-        }
-
-        status.textContent = "✓ Moderation action logged successfully.";
-
-        document.getElementById("userId").value = "";
-        document.getElementById("username").value = "";
-        document.getElementById("reason").value = "";
-
-      } catch (error) {
-
-        status.textContent = "Error: " + error.message;
-
-      } finally {
-
-        button.disabled = false;
-
-      }
-    }
-  </script>
-
 </body>
 </html>
