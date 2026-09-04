@@ -306,7 +306,13 @@ export default async function handler(req, res) {
     );
     return res.status(500).json({
       error:
-        "Unable to save moderator information."
+        `Moderator database error: ${
+          error?.message || String(error)
+        }`,
+      code:
+        error?.code || null,
+      detail:
+        error?.detail || null
     });
   }
   // =========================
@@ -340,16 +346,13 @@ export default async function handler(req, res) {
     );
     return res.status(500).json({
       error:
-        "Moderation action database error",
-      details:
-        error?.message ||
-        String(error),
+        `Moderation action database error: ${
+          error?.message || String(error)
+        }`,
       code:
-        error?.code ||
-        null,
+        error?.code || null,
       detail:
-        error?.detail ||
-        null
+        error?.detail || null
     });
   }
   const actionId =
