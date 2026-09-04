@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chronoverse Moderator Dashboard</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: Arial, sans-serif;
+    }
+    body {
+      min-height: 100vh;
+      background: #0d0d12;
+      color: white;
+      padding: 25px 15px;
+    }
+    .dashboard {
+      max-width: 850px;
+      margin: auto;
+    }
+    header {
+      background: #17171f;
+      border: 1px solid #292936;
+      border-radius: 16px;
+      padding: 25px;
+      margin-bottom: 20px;
+    }
+    header h1 {
+      font-size: 27px;
+      margin-bottom: 8px;
+    }
+    header p {
+      color: #92929f;
+    }
+    .card {
+      background: #17171f;
+      border: 1px solid #292936;
+      border-radius: 16px;
+      padding: 25px;
+      margin-bottom: 20px;
+    }
+    .card h2 {
+      font-size: 20px;
+      margin-bottom: 20px;
+    }
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: bold;
+    }
+    input,
+    select,
+    textarea {
+      width: 100%;
+      background: #0d0d12;
+      color: white;
+      border: 1px solid #30303d;
+      border-radius: 9px;
+      padding: 13px;
+      margin-bottom: 20px;
+      font-size: 15px;
+    }
+    textarea {
+      min-height: 120px;
+      resize: vertical;
+    }
+    button {
+      width: 100%;
+      padding: 14px;
+      border: none;
+      border-radius: 9px;
+      background: #5865F2;
+      color: white;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    button:disabled {
+      opacity: .6;
+      cursor: not-allowed;
+    }
+    #status {
+      margin-top: 15px;
+      text-align: center;
+      color: #aaa;
+    }
+    .logout {
+      display: block;
+      text-align: center;
+      margin-top: 10px;
+      color: #92929f;
+      text-decoration: none;
+      font-size: 14px;
+    }
+    .logout:hover {
+      color: white;
+    }
+  </style>
+</head>
+<body>
+  <div class="dashboard">
+    <header>
+      <h1>🛡️ Chronoverse Moderator Dashboard</h1>
+      <p>Record and manage your moderation actions.</p>
+    </header>
+    <div class="card">
+      <h2>Log Moderation Action</h2>
+      <label for="action">Moderation Action</label>
+      <select id="action">
+        <option value="Warn">⚠️ Warn</option>
+        <option value="Kick">👢 Kick</option>
+        <option value="Ban">🔨 Ban</option>
+        <option value="Unban">🔓 Unban</option>
+        <option value="Timeout">⏱️ Timeout</option>
+        <option value="Note">📝 Moderation Note</option>
+      </select>
+      <label for="userId">User ID</label>
+      <input
+        id="userId"
+        type="text"
+        placeholder="Enter Discord User ID"
+      >
+      <label for="username">Username</label>
+      <input
+        id="username"
+        type="text"
+        placeholder="Enter Discord username"
+      >
+      <label for="reason">Reason</label>
+      <textarea
+        id="reason"
+        placeholder="Enter the reason for this action..."
+      ></textarea>
+      <button id="submitButton" onclick="submitAction()">
+        Submit Moderation Log
+      </button>
+      <div id="status"></div>
+      <a class="logout" href="/">
+        Log out
+      </a>
+    </div>
+  </div>
+  <script>
+    async function submitAction() {
+      const button = document.getElementById("submitButton");
+      const status = document.getElementById("status");
+      const action = document.getElementById("action").value;
+      const userId = document.getElementById("userId").value.trim();
+      const username = document.getElementById("username").value.trim();
+      const reason = document.getElementById("reason").value.trim();
+      if (!userId || !reason) {
+        status.textContent = "Please enter a User ID and reason.";
+        return;
+      }
+      button.disabled = true;
+      status.textContent = "Sending moderation log...";
+      try {
+        const response = await fetch("/api/log-action", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            action,
+            userId,
+            username,
+            reason
+          })
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error || "Something went wrong.");
+        }
+        status.textContent =
+          "✓ Moderation action logged successfully. Case " +
+          data.caseId;
+        document.getElementById("userId").value = "";
+        document.getElementById("username").value = "";
+        document.getElementById("reason").value = "";
+      } catch (error) {
+        status.textContent = "Error: " + error.message;
+      } finally {
+        button.disabled = false;
+      }
+    }
+  </script>
+</body>
+</html>
