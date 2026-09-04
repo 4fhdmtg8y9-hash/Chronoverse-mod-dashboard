@@ -1,16 +1,17 @@
 import crypto from "crypto";
+import sql from "../lib/db.js";
 
 export const runtime = "nodejs";
 
 export const config = {
   api: {
-    bodyParser: false
-  }
+    bodyParser: false,
+  },
 };
 
 const PUBLIC_KEY = process.env.DISCORD_PUBLIC_KEY;
 
-const ALLOWED_ROLES = [
+const ALLOWED_ROLE_IDS = [
   "1538324425546666114",
   "1538505102644740167",
   "1543383003445723159",
@@ -18,661 +19,320 @@ const ALLOWED_ROLES = [
   "1538626890649174170",
   "1538534696483426365",
   "1538569564340879420",
-  "1538569917471916083"
+  "1538569917471916083",
 ];
 
 function getRawBody(req) {
   return new Promise((resolve, reject) => {
-    const chunks = [];
+    let data = "";
 
-    req.on("data", chunk => chunks.push(chunk));
+    req.setEncoding("utf8");
+
+    req.on("data", (chunk) => {
+      data += chunk;
+    });
 
     req.on("end", () => {
-      resolve(Buffer.concat(chunks));
+      resolve(data);
     });
 
     req.on("error", reject);
   });
 }
 
-function verifyDiscordRequest(
-  rawBody,
-  signature,
-  timestamp
-) {
+function verifyDiscordRequest(rawBody, signature, timestamp) {
+  if (!signature || !timestamp || !PUBLIC_KEY) {
+    return false;
+  }
+
   try {
-    if (!PUBLIC_KEY) {
-      return false;
-    }
-
-    const publicKeyDer = Buffer.concat([
-      Buffer.from(
-        "302a300506032b6570032100",
-        "hex"
-      ),
-      Buffer.from(PUBLIC_KEY, "hex")
-    ]);
-
-    const publicKey = crypto.createPublicKey({
-      key: publicKeyDer,
-      format: "der",
-      type: "spki"
-    });
-
     return crypto.verify(
       null,
-      Buffer.from(
-        timestamp + rawBody.toString()
-      ),
-      publicKey,
+      Buffer.from(timestamp + rawBody),
+      {
+        key: Buffer.from(PUBLIC_KEY, "hex"),
+        dsaEncoding: "der",
+      },
       Buffer.from(signature, "hex")
     );
-
   } catch (error) {
-
-    console.error(
-      "SIGNATURE VERIFICATION ERROR:",
-      error?.message || String(error)
-    );
-
+    console.error("Discord signature verification error:", error);
     return false;
   }
 }
 
 export default async function handler(req, res) {
-
-  // =========================
-  // BROWSER TEST
-  // =========================
+  // Browser test
+  if (req.method === "GET") {
+    return res.status(200).json({
+      status: "Discord interactions endpoint is online.",
+    });
+  }
 
   if (req.method !== "POST") {
-
-    return res.status(200).json({
-      status:
-        "Discord interactions endpoint is online."
+    return res.status(405).json({
+      error: "Method not allowed",
     });
-
   }
-
-  // =========================
-  // CHECK PUBLIC KEY
-  // =========================
-
-  if (!PUBLIC_KEY) {
-
-    return res.status(500).json({
-      error:
-        "DISCORD_PUBLIC_KEY is missing."
-    });
-
-  }
-
-  // =========================
-  // DISCORD SIGNATURE
-  // =========================
-
-  const signature =
-    req.headers["x-signature-ed25519"];
-
-  const timestamp =
-    req.headers["x-signature-timestamp"];
-
-  if (!signature || !timestamp) {
-
-    return res.status(401).json({
-      error:
-        "Missing Discord signature."
-    });
-
-  }
-
-  // =========================
-  // READ RAW BODY
-  // =========================
-
-  let rawBody;
 
   try {
+    const rawBody = await getRawBody(req);
 
-    rawBody =
-      await getRawBody(req);
+    const signature =
+      req.headers["x-signature-ed25519"];
 
-  } catch (error) {
+    const timestamp =
+      req.headers["x-signature-timestamp"];
 
-    console.error(
-      "RAW BODY ERROR:",
-      error?.message || String(error)
-    );
+    // Verify request came from Discord
+    if (
+      !verifyDiscordRequest(
+        rawBody,
+        signature,
+        timestamp
+      )
+    ) {
+      console.error("Invalid Discord signature");
 
-    return res.status(500).json({
-      error:
-        "Unable to read request body."
-    });
+      return res.status(401).send("Invalid request signature");
+    }
 
-  }
+    const interaction = JSON.parse(rawBody);
 
-  // =========================
-  // VERIFY DISCORD
-  // =========================
+    // Discord Ping
+    if (interaction.type === 1) {
+      return res.status(200).json({
+        type: 1,
+      });
+    }
 
-  if (
-    !verifyDiscordRequest(
-      rawBody,
-      signature,
-      timestamp
-    )
-  ) {
+    // Buttons / components
+    if (interaction.type === 3) {
+      const customId =
+        interaction.data?.custom_id || "";
 
-    return res.status(401).json({
-      error:
-        "Invalid Discord signature."
-    });
-
-  }
-
-  // =========================
-  // PARSE INTERACTION
-  // =========================
-
-  let interaction;
-
-  try {
-
-    interaction =
-      JSON.parse(
-        rawBody.toString()
-      );
-
-  } catch (error) {
-
-    console.error(
-      "JSON PARSE ERROR:",
-      error?.message || String(error)
-    );
-
-    return res.status(400).json({
-      error:
-        "Invalid JSON."
-    });
-
-  }
-
-  // =========================
-  // DISCORD PING
-  // =========================
-
-  if (interaction.type === 1) {
-
-    return res.status(200).json({
-      type: 1
-    });
-
-  }
-
-  // =========================
-  // BUTTON INTERACTION
-  // =========================
-
-  if (
-    interaction.type !== 3 ||
-    !interaction.data ||
-    !interaction.data.custom_id
-  ) {
-
-    return res.status(400).json({
-      error:
-        "Unsupported Discord interaction."
-    });
-
-  }
-
-  const customId =
-    interaction.data.custom_id;
-
-  console.log(
-    "MODERATION BUTTON CLICKED:",
-    customId
-  );
-
-  // =========================
-  // CHECK BUTTON ID
-  // =========================
-
-  if (
-    !customId.startsWith("mod_")
-  ) {
-
-    return res.status(400).json({
-      error:
-        "Unknown moderation button."
-    });
-
-  }
-
-  const parts =
-    customId.split("_");
-
-  const decision =
-    parts[1];
-
-  const actionId =
-    parts[2];
-
-  if (
-    !["approve", "deny"].includes(
-      decision
-    ) ||
-    !actionId
-  ) {
-
-    return res.status(400).json({
-      error:
-        "Invalid moderation button."
-    });
-
-  }
-
-  console.log(
-    "Decision:",
-    decision,
-    "Action ID:",
-    actionId
-  );
-
-  // =========================
-  // CHECK MEMBER
-  // =========================
-
-  const member =
-    interaction.member;
-
-  if (
-    !member ||
-    !member.roles
-  ) {
-
-    return res.status(200).json({
-      type: 4,
-      data: {
-        content:
-          "❌ Moderator information unavailable.",
-        flags: 64
+      // Only handle moderation buttons
+      if (
+        !customId.startsWith("mod_approve_") &&
+        !customId.startsWith("mod_deny_")
+      ) {
+        return res.status(200).json({
+          type: 6,
+        });
       }
-    });
 
-  }
+      const isApprove =
+        customId.startsWith("mod_approve_");
 
-  // =========================
-  // CHECK PERMISSION
-  // =========================
+      const actionId = customId
+        .replace(
+          isApprove
+            ? "mod_approve_"
+            : "mod_deny_",
+          ""
+        );
 
-  const hasPermission =
-    member.roles.some(
-      roleId =>
-        ALLOWED_ROLES.includes(
-          roleId
-        )
-    );
-
-  if (!hasPermission) {
-
-    return res.status(200).json({
-      type: 4,
-      data: {
-        content:
-          "❌ You do not have permission to review moderation logs.",
-        flags: 64
+      if (!actionId) {
+        return res.status(400).json({
+          error: "Missing action ID",
+        });
       }
-    });
 
-  }
+      // Check moderator roles
+      const memberRoles =
+        interaction.member?.roles || [];
 
-  // =========================
-  // ORIGINAL MESSAGE
-  // =========================
+      const hasPermission =
+        memberRoles.some((roleId) =>
+          ALLOWED_ROLE_IDS.includes(roleId)
+        );
 
-  const originalMessage =
-    interaction.message;
-
-  if (!originalMessage) {
-
-    return res.status(200).json({
-      type: 4,
-      data: {
-        content:
-          "❌ Original moderation message could not be found.",
-        flags: 64
+      if (!hasPermission) {
+        return res.status(200).json({
+          type: 4,
+          data: {
+            content:
+              "❌ You do not have permission to review moderation actions.",
+            flags: 64,
+          },
+        });
       }
-    });
 
-  }
-
-  // =========================
-  // DATABASE
-  // =========================
-
-  try {
-
-    const { default: sql } =
-      await import("../lib/db.js");
-
-    // =========================
-    // GET MODERATION ACTION
-    // =========================
-
-    const actionRows =
-      await sql`
-
+      // Find moderation action
+      const result = await sql`
         SELECT
           ma.id,
-          ma.status,
+          ma.moderator_id,
           ma.action_type,
           ma.target_discord_id,
           ma.reason,
+          ma.created_at,
           ma.case_id,
-          ma.discord_message_id,
-          ma.discord_channel_id,
+          ma.status,
           ma.points_awarded,
-          m.id AS moderator_id,
-          m.username AS moderator_username
-
+          m.discord_id AS moderator_discord_id
         FROM mod_actions ma
-
-        JOIN moderators m
+        LEFT JOIN moderators m
           ON ma.moderator_id = m.id
-
         WHERE ma.id = ${actionId}
-
         LIMIT 1
-
       `;
 
-    if (
-      actionRows.length === 0
-    ) {
+      if (!result || result.length === 0) {
+        return res.status(200).json({
+          type: 4,
+          data: {
+            content:
+              "❌ This moderation action could not be found.",
+            flags: 64,
+          },
+        });
+      }
 
-      return res.status(200).json({
-        type: 4,
-        data: {
-          content:
-            "❌ This moderation log no longer exists.",
-          flags: 64
-        }
-      });
+      const action = result[0];
 
-    }
+      // Prevent double verification
+      if (action.status !== "pending") {
+        return res.status(200).json({
+          type: 4,
+          data: {
+            content:
+              `⚠️ This case has already been ${action.status}.`,
+            flags: 64,
+          },
+        });
+      }
 
-    const action =
-      actionRows[0];
-
-    // =========================
-    // PREVENT DOUBLE ACTION
-    // =========================
-
-    if (
-      action.status !== "pending"
-    ) {
-
-      return res.status(200).json({
-        type: 4,
-        data: {
-          content:
-            `⚠️ This case has already been **${action.status}**.`,
-          flags: 64
-        }
-      });
-
-    }
-
-    // =========================
-    // NEW STATUS
-    // =========================
-
-    const newStatus =
-      decision === "approve"
+      const newStatus = isApprove
         ? "approved"
         : "denied";
 
-    const reviewerId =
-      interaction.member.user.id;
+      const reviewerId =
+        interaction.member?.user?.id ||
+        interaction.user?.id ||
+        "unknown";
 
-    // =========================
-    // UPDATE MODERATION ACTION
-    // =========================
-
-    await sql`
-
-      UPDATE mod_actions
-
-      SET
-        status = ${newStatus},
-        reviewed_by = ${reviewerId},
-        reviewed_at = CURRENT_TIMESTAMP
-
-      WHERE id = ${actionId}
-
-    `;
-
-    // =========================
-    // AWARD 5 POINTS
-    // =========================
-
-    if (
-      decision === "approve"
-    ) {
-
-      console.log(
-        "Awarding 5 points to moderator:",
-        action.moderator_id
-      );
-
+      // Update case status
       await sql`
-
-        UPDATE moderators
-
-        SET
-          points =
-            COALESCE(points, 0) + 5,
-
-          approved_actions =
-            COALESCE(approved_actions, 0) + 1
-
-        WHERE id =
-          ${action.moderator_id}
-
-      `;
-
-      // Record that points were awarded
-      await sql`
-
         UPDATE mod_actions
-
         SET
-          points_awarded = 5
-
+          status = ${newStatus},
+          reviewed_by = ${reviewerId},
+          reviewed_at = NOW()
         WHERE id = ${actionId}
-
+          AND status = 'pending'
       `;
 
-      console.log(
-        "5 points awarded successfully."
-      );
+      // APPROVED = +5 points
+      if (isApprove) {
+        await sql`
+          UPDATE moderators
+          SET
+            points = COALESCE(points, 0) + 5,
+            approved_actions =
+              COALESCE(approved_actions, 0) + 1
+          WHERE id = ${action.moderator_id}
+        `;
 
-    }
+        await sql`
+          UPDATE mod_actions
+          SET points_awarded = 5
+          WHERE id = ${actionId}
+        `;
+      } else {
+        await sql`
+          UPDATE mod_actions
+          SET points_awarded = 0
+          WHERE id = ${actionId}
+        `;
+      }
 
-    // =========================
-    // STATUS TEXT
-    // =========================
+      // Get the existing Discord embed
+      const existingEmbeds =
+        interaction.message?.embeds || [];
 
-    const statusText =
-      decision === "approve"
-        ? "✅ APPROVED"
-        : "❌ DENIED";
-
-    // =========================
-    // UPDATE EMBED
-    // =========================
-
-    const updatedEmbeds =
-      (
-        originalMessage.embeds || []
-      ).map(embed => {
-
-        let fields =
-          [...(embed.fields || [])];
-
-        // Find Status
-        const statusIndex =
-          fields.findIndex(
-            field =>
-              field.name === "Status"
-          );
-
-        if (
-          statusIndex !== -1
-        ) {
-
-          fields[statusIndex] = {
-            ...fields[statusIndex],
-
-            name:
-              "Status",
-
-            value:
-              statusText
+      let embed = existingEmbeds[0]
+        ? {
+            ...existingEmbeds[0],
+          }
+        : {
+            title: "🛡️ Moderation Action",
           };
 
-        } else {
+      // Update status
+      const oldFields = embed.fields || [];
 
-          fields.push({
-            name:
-              "Status",
-
-            value:
-              statusText,
-
-            inline:
-              false
-          });
-
+      const fields = oldFields.map((field) => {
+        if (field.name === "Status") {
+          return {
+            ...field,
+            value: isApprove
+              ? "🟢 APPROVED"
+              : "🔴 DENIED",
+          };
         }
 
-        // Remove existing reviewer
-        fields =
-          fields.filter(
-            field =>
-              field.name !==
-              "Reviewed By"
-          );
-
-        // Add reviewer
-        fields.push({
-          name:
-            "Reviewed By",
-
-          value:
-            `<@${reviewerId}>`,
-
-          inline:
-            false
-        });
-
-        return {
-          ...embed,
-          fields
-        };
-
+        return field;
       });
 
-    // =========================
-    // DISABLE BUTTONS
-    // =========================
+      // Add reviewer
+      fields.push({
+        name: "Reviewed By",
+        value: `<@${reviewerId}>`,
+        inline: true,
+      });
 
-    const updatedComponents = [
-      {
-        type: 1,
+      // Add points information
+      fields.push({
+        name: "Points",
+        value: isApprove
+          ? "⭐ +5 points awarded"
+          : "0 points awarded",
+        inline: true,
+      });
 
-        components: [
+      embed.fields = fields;
 
-          {
-            type: 2,
+      // Disable buttons
+      const disabledComponents = (
+        interaction.message?.components || []
+      ).map((row) => ({
+        ...row,
+        components: (row.components || []).map(
+          (button) => ({
+            ...button,
+            disabled: true,
+          })
+        ),
+      }));
 
-            style: 3,
-
-            label:
-              decision === "approve"
-                ? "Approved"
-                : "Approve",
-
-            custom_id:
-              `mod_approve_${actionId}`,
-
-            disabled:
-              true
-          },
-
-          {
-            type: 2,
-
-            style: 4,
-
-            label:
-              decision === "deny"
-                ? "Denied"
-                : "Deny",
-
-            custom_id:
-              `mod_deny_${actionId}`,
-
-            disabled:
-              true
-          }
-
-        ]
-      }
-    ];
-
-    // =========================
-    // UPDATE DISCORD MESSAGE
-    // =========================
-
-    console.log(
-      "Sending Discord message update..."
-    );
+      // Update the original Discord message
+      return res.status(200).json({
+        type: 7,
+        data: {
+          embeds: [embed],
+          components: disabledComponents,
+        },
+      });
+    }
 
     return res.status(200).json({
-
-      type: 7,
-
-      data: {
-
-        content:
-          originalMessage.content || "",
-
-        embeds:
-          updatedEmbeds,
-
-        components:
-          updatedComponents
-
-      }
-
+      type: 6,
     });
-
   } catch (error) {
-
     console.error(
       "MODERATION INTERACTION ERROR:",
       error?.message || String(error),
-
       error?.stack || ""
     );
 
-    return res.status(500).json({
-      error:
-        "Unable to process the moderation decision."
+    return res.status(200).json({
+      type: 4,
+      data: {
+        content:
+          "❌ Something went wrong while processing this moderation action.",
+        flags: 64,
+      },
     });
-
   }
-
 }
