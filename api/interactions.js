@@ -42,21 +42,41 @@ function getRawBody(req) {
 
 function verifyDiscordRequest(rawBody, signature, timestamp) {
   if (!signature || !timestamp || !PUBLIC_KEY) {
+    console.error(
+      "Missing Discord verification headers or public key"
+    );
     return false;
   }
 
   try {
+    const message = Buffer.from(timestamp + rawBody);
+
+    const signatureBuffer = Buffer.from(
+      signature,
+      "hex"
+    );
+
+    const publicKeyBuffer = Buffer.from(
+      PUBLIC_KEY,
+      "hex"
+    );
+
     return crypto.verify(
       null,
-      Buffer.from(timestamp + rawBody),
+      message,
       {
-        key: Buffer.from(PUBLIC_KEY, "hex"),
-        dsaEncoding: "der",
+        key: publicKeyBuffer,
+        format: "der",
+        type: "spki",
       },
-      Buffer.from(signature, "hex")
+      signatureBuffer
     );
   } catch (error) {
-    console.error("Discord signature verification error:", error);
+    console.error(
+      "Discord signature verification error:",
+      error?.message || error
+    );
+
     return false;
   }
 }
@@ -84,17 +104,19 @@ export default async function handler(req, res) {
     const timestamp =
       req.headers["x-signature-timestamp"];
 
-    // Verify request came from Discord
-    if (
-      !verifyDiscordRequest(
-        rawBody,
-        signature,
-        timestamp
-      )
-    ) {
+    // Verify the request came from Discord
+    const verified = verifyDiscordRequest(
+      rawBody,
+      signature,
+      timestamp
+    );
+
+    if (!verified) {
       console.error("Invalid Discord signature");
 
-      return res.status(401).send("Invalid request signature");
+      return res
+        .status(401)
+        .send("Invalid request signature");
     }
 
     const interaction = JSON.parse(rawBody);
@@ -106,7 +128,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // Buttons / components
+    // Discord button/component interaction
     if (interaction.type === 3) {
       const customId =
         interaction.data?.custom_id || "";
@@ -124,13 +146,12 @@ export default async function handler(req, res) {
       const isApprove =
         customId.startsWith("mod_approve_");
 
-      const actionId = customId
-        .replace(
-          isApprove
-            ? "mod_approve_"
-            : "mod_deny_",
-          ""
-        );
+      const actionId = customId.replace(
+        isApprove
+          ? "mod_approve_"
+          : "mod_deny_",
+        ""
+      );
 
       if (!actionId) {
         return res.status(400).json({
@@ -223,7 +244,7 @@ export default async function handler(req, res) {
           AND status = 'pending'
       `;
 
-      // APPROVED = +5 points
+      // APPROVED = +5 POINTS
       if (isApprove) {
         await sql`
           UPDATE moderators
@@ -259,7 +280,7 @@ export default async function handler(req, res) {
             title: "🛡️ Moderation Action",
           };
 
-      // Update status
+      // Update Status field
       const oldFields = embed.fields || [];
 
       const fields = oldFields.map((field) => {
@@ -282,7 +303,7 @@ export default async function handler(req, res) {
         inline: true,
       });
 
-      // Add points information
+      // Add points
       fields.push({
         name: "Points",
         value: isApprove
