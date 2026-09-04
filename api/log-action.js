@@ -340,10 +340,20 @@ export default async function handler(req, res) {
     );
     return res.status(500).json({
       error:
-        "Unable to save the moderation action."
+        "Moderation action database error",
+      details:
+        error?.message ||
+        String(error),
+      code:
+        error?.code ||
+        null,
+      detail:
+        error?.detail ||
+        null
     });
   }
-  const actionId = actionRecord[0].id;
+  const actionId =
+    actionRecord[0].id;
   // =========================
   // CREATE EMBED
   // =========================
@@ -431,8 +441,9 @@ export default async function handler(req, res) {
     const payload = {
       content:
         `<@&${overseerRoleId}> <@&${executiveRoleId}>`,
-      embeds:
-        [embed],
+      embeds: [
+        embed
+      ],
       // =========================
       // APPROVE / DENY BUTTONS
       // =========================
@@ -532,8 +543,7 @@ export default async function handler(req, res) {
     // SUCCESS
     // =========================
     return res.status(200).json({
-      success:
-        true,
+      success: true,
       caseId,
       actionId
     });
