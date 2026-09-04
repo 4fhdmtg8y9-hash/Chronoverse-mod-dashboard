@@ -12,9 +12,9 @@ CREATE TABLE IF NOT EXISTS mod_actions (
     action_type VARCHAR(30) NOT NULL,
     target_discord_id VARCHAR(30),
     reason TEXT,
+    case_id VARCHAR(30) UNIQUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-
 CREATE TABLE IF NOT EXISTS requests (
     id SERIAL PRIMARY KEY,
     type VARCHAR(30) NOT NULL,
