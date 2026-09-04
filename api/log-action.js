@@ -1,15 +1,18 @@
-import Busboy from "busboy";
-
-export const config = {
-  api: {
-    bodyParser: false
-  }
-};
-
 export default async function handler(req, res) {
   if (req.method !== "POST") {
-    return res.status(405).json({
-      error: "Method not allowed"
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+
+  const {
+    action,
+    userId,
+    username,
+    reason
+  } = req.body || {};
+
+  if (!action || !userId || !reason) {
+    return res.status(400).json({
+      error: "Action, user ID, and reason are required."
     });
   }
 
@@ -22,6 +25,7 @@ export default async function handler(req, res) {
     });
   }
 
+  // Get the logged-in moderator from their Discord login
   const cookies = req.headers.cookie || "";
 
   const tokenMatch = cookies.match(
@@ -37,7 +41,6 @@ export default async function handler(req, res) {
   const accessToken = decodeURIComponent(tokenMatch[1]);
 
   try {
-    // Get the logged-in moderator
     const userResponse = await fetch(
       "https://discord.com/api/users/@me",
       {
@@ -55,89 +58,13 @@ export default async function handler(req, res) {
 
     const moderatorUser = await userResponse.json();
 
-    const moderatorName = moderatorUser.username;
+    const moderatorName =
+      moderatorUser.global_name ||
+      moderatorUser.username;
 
-    const fields = {};
-    let evidenceFile = null;
-    let uploadError = null;
-
-    await new Promise((resolve, reject) => {
-      const busboy = Busboy({
-        headers: req.headers,
-        limits: {
-          fileSize: 8 * 1024 * 1024,
-          files: 1
-        }
-      });
-
-      busboy.on("field", (name, value) => {
-        fields[name] = value;
-      });
-
-      busboy.on("file", (name, file, info) => {
-        const chunks = [];
-
-        const filename = info.filename;
-        const mimeType = info.mimeType;
-
-        file.on("data", (chunk) => {
-          chunks.push(chunk);
-        });
-
-        file.on("limit", () => {
-          uploadError =
-            "Evidence image is too large. Maximum size is 8 MB.";
-        });
-
-        file.on("end", () => {
-          if (name === "evidence" && filename) {
-            evidenceFile = {
-              filename,
-              mimeType,
-              buffer: Buffer.concat(chunks)
-            };
-          }
-        });
-      });
-
-      busboy.on("finish", resolve);
-
-      busboy.on("error", reject);
-
-      req.pipe(busboy);
-    });
-
-    if (uploadError) {
-      return res.status(400).json({
-        error: uploadError
-      });
-    }
-
-    const action = fields.action;
-    const userId = fields.userId;
-    const username = fields.username;
-    const reason = fields.reason;
-
-    if (!action || !userId || !reason) {
-      return res.status(400).json({
-        error: "Action, user ID, and reason are required."
-      });
-    }
-
-    const validActions = [
-      "Warn",
-      "Kick",
-      "Ban",
-      "Unban",
-      "Timeout",
-      "Note"
-    ];
-
-    if (!validActions.includes(action)) {
-      return res.status(400).json({
-        error: "Invalid moderation action."
-      });
-    }
+    // Roles to ping
+    const pingRoles =
+      "<@&1538505102644740167> <@&1543383003445723159>";
 
     const colors = {
       Ban: 0xED4245,
@@ -147,6 +74,8 @@ export default async function handler(req, res) {
       Kick: 0x99AAB5,
       Note: 0x5865F2
     };
+
+    const embedColor = colors[action] || 0x5865F2;
 
     const caseId =
       `#${Date.now().toString().slice(-6)}`;
@@ -166,69 +95,8 @@ export default async function handler(req, res) {
       timeZone: "Europe/Paris"
     });
 
-    const embedFields = [
-      {
-        name: "Moderator",
-        value: moderatorName,
-        inline: false
-      },
-      {
-        name: "Action",
-        value: action,
-        inline: false
-      },
-      {
-        name: "User",
-        value: username || "Unknown",
-        inline: false
-      },
-      {
-        name: "User ID",
-        value: `\`${userId}\``,
-        inline: false
-      },
-      {
-        name: "Reason",
-        value: reason,
-        inline: false
-      }
-    ];
-
-    if (evidenceFile) {
-      embedFields.push({
-        name: "📸 Evidence",
-        value: "Evidence attached below.",
-        inline: false
-      });
-    } else {
-      embedFields.push({
-        name: "📸 Evidence",
-        value: "No evidence provided.",
-        inline: false
-      });
-    }
-
-    embedFields.push(
-      {
-        name: "Date",
-        value: date,
-        inline: true
-      },
-      {
-        name: "Time",
-        value: time,
-        inline: true
-      },
-      {
-        name: "Case ID",
-        value: caseId,
-        inline: true
-      }
-    );
-
     const message = {
-      content:
-        "<@&1538505102644740167> <@&1543383003445723159>",
+      content: pingRoles,
 
       allowed_mentions: {
         roles: [
@@ -240,8 +108,51 @@ export default async function handler(req, res) {
       embeds: [
         {
           title: "🛡️ Moderation Action",
-          color: colors[action] || 0x5865F2,
-          fields: embedFields,
+          color: embedColor,
+
+          fields: [
+            {
+              name: "Moderator",
+              value: moderatorName,
+              inline: false
+            },
+            {
+              name: "Action",
+              value: action,
+              inline: false
+            },
+            {
+              name: "User",
+              value: username || "Unknown",
+              inline: false
+            },
+            {
+              name: "User ID",
+              value: `\`${userId}\``,
+              inline: false
+            },
+            {
+              name: "Reason",
+              value: reason,
+              inline: false
+            },
+            {
+              name: "Date",
+              value: date,
+              inline: true
+            },
+            {
+              name: "Time",
+              value: time,
+              inline: true
+            },
+            {
+              name: "Case ID",
+              value: caseId,
+              inline: true
+            }
+          ],
+
           footer: {
             text: "Chronoverse Moderator Dashboard"
           }
@@ -249,61 +160,23 @@ export default async function handler(req, res) {
       ]
     };
 
-    let response;
+    const response = await fetch(
+      `https://discord.com/api/v10/channels/${channelId}/messages`,
+      {
+        method: "POST",
 
-    if (evidenceFile) {
-      const form = new FormData();
+        headers: {
+          "Authorization": `Bot ${botToken}`,
+          "Content-Type": "application/json"
+        },
 
-      form.append(
-        "payload_json",
-        JSON.stringify(message)
-      );
-
-      const blob = new Blob(
-        [evidenceFile.buffer],
-        {
-          type: evidenceFile.mimeType
-        }
-      );
-
-      form.append(
-        "files[0]",
-        blob,
-        evidenceFile.filename
-      );
-
-      response = await fetch(
-        `https://discord.com/api/v10/channels/${channelId}/messages`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bot ${botToken}`
-          },
-          body: form
-        }
-      );
-    } else {
-      response = await fetch(
-        `https://discord.com/api/v10/channels/${channelId}/messages`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bot ${botToken}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify(message)
-        }
-      );
-    }
+        body: JSON.stringify(message)
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
-
-      console.error("Discord error:", error);
-
-      return res.status(response.status).json({
-        error: "Discord rejected the moderation log."
-      });
+      return res.status(response.status).send(error);
     }
 
     return res.status(200).json({
@@ -313,10 +186,10 @@ export default async function handler(req, res) {
     });
 
   } catch (error) {
-    console.error("LOG ACTION ERROR:", error);
+    console.error(error);
 
     return res.status(500).json({
-      error: error.message || "Failed to send moderation log."
+      error: "Failed to send moderation log."
     });
   }
 }
