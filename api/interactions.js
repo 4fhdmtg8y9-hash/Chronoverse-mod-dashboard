@@ -52,6 +52,7 @@ function verifyDiscordRequest(rawBody, signature, timestamp) {
       publicKey,
       Buffer.from(signature, "hex")
     );
+
   } catch (error) {
     console.error("Discord verification error:", error);
     return false;
@@ -84,7 +85,11 @@ export default async function handler(req, res) {
 
   const rawBody = await getRawBody(req);
 
-  if (!verifyDiscordRequest(rawBody, signature, timestamp)) {
+  if (!verifyDiscordRequest(
+    rawBody,
+    signature,
+    timestamp
+  )) {
     return res.status(401).json({
       error: "Invalid Discord signature."
     });
@@ -100,14 +105,14 @@ export default async function handler(req, res) {
     });
   }
 
-  // Discord verification
+  // Discord verification ping
   if (interaction.type === 1) {
     return res.status(200).json({
       type: 1
     });
   }
 
-  // Only component interactions
+  // Only button interactions
   if (
     interaction.type !== 3 ||
     !interaction.data ||
@@ -168,29 +173,29 @@ export default async function handler(req, res) {
   }
 
   /*
-   * IMPORTANT:
-   * Acknowledge Discord IMMEDIATELY.
-   *
-   * Type 6 = DEFERRED_UPDATE_MESSAGE
-   *
-   * This prevents the "The app isn't responding" timeout.
+   * ACKNOWLEDGE IMMEDIATELY
    */
   res.status(200).json({
     type: 6
   });
 
   /*
-   * Everything below happens after Discord
-   * has already received the acknowledgement.
+   * PROCESS AFTER ACKNOWLEDGEMENT
    */
 
   try {
-    const { default: sql } = await import("../lib/db.js");
 
-    // Make sure the newer columns exist.
+    const { default: sql } =
+      await import("../lib/db.js");
+
+    /*
+     * Make sure the database columns exist.
+     */
+
     await sql`
       ALTER TABLE mod_actions
-      ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'pending'
+      ADD COLUMN IF NOT EXISTS status VARCHAR(20)
+      DEFAULT 'pending'
     `;
 
     await sql`
@@ -218,7 +223,11 @@ export default async function handler(req, res) {
       ADD COLUMN IF NOT EXISTS case_id VARCHAR(30)
     `;
 
-    const actionRows = await sql`
+    /*
+     * Find the moderation action.
+     */
+
+    const rows = await sql`
       SELECT
         ma.id,
         ma.status,
@@ -228,8 +237,6 @@ export default async function handler(req, res) {
         ma.case_id,
         ma.discord_message_id,
         ma.discord_channel_id,
-        m.id AS moderator_id,
-        m.discord_id AS moderator_discord_id,
         m.username AS moderator_username
       FROM mod_actions ma
       JOIN moderators m
@@ -238,17 +245,26 @@ export default async function handler(req, res) {
       LIMIT 1
     `;
 
-    if (actionRows.length === 0) {
-      console.error("Moderation action not found:", actionId);
+    if (rows.length === 0) {
+      console.error(
+        "Moderation action not found:",
+        actionId
+      );
+
       return;
     }
 
-    const action = actionRows[0];
+    const action = rows[0];
+
+    /*
+     * Don't allow a case to be reviewed twice.
+     */
 
     if (action.status !== "pending") {
       console.log(
-        `Action ${actionId} already has status ${action.status}`
+        `Case ${actionId} already ${action.status}`
       );
+
       return;
     }
 
@@ -257,7 +273,12 @@ export default async function handler(req, res) {
         ? "approved"
         : "denied";
 
-    const reviewerId = interaction.member.user.id;
+    const reviewerId =
+      interaction.member.user.id;
+
+    /*
+     * Update database.
+     */
 
     await sql`
       UPDATE mod_actions
@@ -269,43 +290,80 @@ export default async function handler(req, res) {
     `;
 
     /*
-     * Update the Discord message.
+     * Get the Discord message information.
      */
 
-    const interactionToken = interaction.token;
+    const messageId =
+      interaction.message.id;
 
-    const originalMessage = interaction.message;
+    const channelId =
+      interaction.channel_id;
+
+    const botToken =
+      process.env.DISCORD_BOT_TOKEN;
+
+    if (!botToken) {
+      console.error(
+        "DISCORD_BOT_TOKEN is missing."
+      );
+
+      return;
+    }
+
+    /*
+     * Build the updated embeds.
+     */
+
+    const originalEmbeds =
+      interaction.message.embeds || [];
 
     const updatedEmbeds =
-      (originalMessage.embeds || []).map(embed => {
+      originalEmbeds.map(embed => {
 
-        const fields = [...(embed.fields || [])];
-
-        const statusFieldIndex =
-          fields.findIndex(
-            field => field.name === "Status"
-          );
+        const fields =
+          [...(embed.fields || [])];
 
         const statusText =
           newStatus === "approved"
             ? "✅ APPROVED"
             : "❌ DENIED";
 
-        if (statusFieldIndex >= 0) {
-          fields[statusFieldIndex] = {
+        const statusIndex =
+          fields.findIndex(
+            field =>
+              field.name === "Status"
+          );
+
+        if (statusIndex !== -1) {
+
+          fields[statusIndex] = {
             name: "Status",
             value: statusText,
             inline: false
           };
+
         } else {
+
           fields.push({
             name: "Status",
             value: statusText,
             inline: false
           });
+
         }
 
-        fields.push({
+        /*
+         * Remove an old Reviewed By field
+         * if one somehow exists.
+         */
+
+        const filteredFields =
+          fields.filter(
+            field =>
+              field.name !== "Reviewed By"
+          );
+
+        filteredFields.push({
           name: "Reviewed By",
           value: `<@${reviewerId}>`,
           inline: false
@@ -313,58 +371,75 @@ export default async function handler(req, res) {
 
         return {
           ...embed,
-          fields
+          fields: filteredFields
         };
       });
 
-    const botToken = process.env.DISCORD_BOT_TOKEN;
+    /*
+     * Disable the buttons.
+     */
 
-    if (!botToken) {
-      console.error("DISCORD_BOT_TOKEN is missing.");
-      return;
-    }
+    const components = [
+      {
+        type: 1,
+        components: [
+          {
+            type: 2,
+            style:
+              newStatus === "approved"
+                ? 3
+                : 4,
+            label:
+              newStatus === "approved"
+                ? "Approved"
+                : "Denied",
+            custom_id:
+              `mod_${decision}_${actionId}`,
+            disabled: true
+          }
+        ]
+      }
+    ];
 
     /*
-     * Edit the original interaction message.
+     * EDIT THE DISCORD MESSAGE
+     * DIRECTLY THROUGH THE BOT API.
      */
-    const editResponse = await fetch(
-      `https://discord.com/api/v10/webhooks/${interaction.application_id}/${interactionToken}/messages/@original`,
-      {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          content: originalMessage.content || "",
-          embeds: updatedEmbeds,
-          components: [
-            {
-              type: 1,
-              components: [
-                {
-                  type: 2,
-                  style: newStatus === "approved" ? 3 : 4,
-                  label:
-                    newStatus === "approved"
-                      ? "Approved"
-                      : "Denied",
-                  custom_id:
-                    `mod_${decision}_${actionId}`,
-                  disabled: true
-                }
-              ]
-            }
-          ]
-        })
-      }
-    );
 
-    if (!editResponse.ok) {
-      const errorText = await editResponse.text();
+    const discordResponse =
+      await fetch(
+        `https://discord.com/api/v10/channels/${channelId}/messages/${messageId}`,
+        {
+          method: "PATCH",
+
+          headers: {
+            "Authorization":
+              `Bot ${botToken}`,
+
+            "Content-Type":
+              "application/json"
+          },
+
+          body: JSON.stringify({
+            content:
+              interaction.message.content || "",
+
+            embeds:
+              updatedEmbeds,
+
+            components
+          })
+        }
+      );
+
+    if (!discordResponse.ok) {
+
+      const errorText =
+        await discordResponse.text();
 
       console.error(
         "Discord message update failed:",
-        editResponse.status,
+        discordResponse.status,
         errorText
       );
 
@@ -372,13 +447,13 @@ export default async function handler(req, res) {
     }
 
     console.log(
-      `Moderation action ${actionId} ${newStatus}.`
+      `Successfully ${newStatus} moderation action ${actionId}.`
     );
 
   } catch (error) {
 
     console.error(
-      "Moderation approval processing error:",
+      "Moderation interaction error:",
       error
     );
   }
