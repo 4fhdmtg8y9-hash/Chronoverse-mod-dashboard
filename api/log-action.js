@@ -21,7 +21,7 @@ export default async function handler(req, res) {
   // =========================
 
   const guildId =
-    "1541157556041424986";
+  "1538324229114695753";
 
   const logChannelId =
     "1545249591526555658";
