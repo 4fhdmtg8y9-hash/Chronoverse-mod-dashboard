@@ -2,6 +2,7 @@
   "name": "chronoverse-mod-dashboard",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "dependencies": {
     "busboy": "^1.6.0",
     "@neondatabase/serverless": "^1.0.0"
