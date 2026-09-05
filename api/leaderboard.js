@@ -1,6 +1,3 @@
 export default function handler(req, res) {
-  return res.status(200).json({
-    success: true,
-    message: "Leaderboard API is working!",
-  });
+  res.status(200).send("LEADERBOARD WORKS");
 }
